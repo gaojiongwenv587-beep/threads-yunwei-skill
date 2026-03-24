@@ -1,0 +1,9 @@
+# Memory and session state
+.claude/
+memory/
+
+# Temp/runtime files
+/tmp/
+
+# macOS
+.DS_Store

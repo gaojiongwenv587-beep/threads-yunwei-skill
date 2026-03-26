@@ -5,5 +5,11 @@ memory/
 # Temp/runtime files
 /tmp/
 
+# !! 敏感配置文件，绝不上传 !!
+*secrets*
+*_secrets.json
+.env
+.env.*
+
 # macOS
 .DS_Store

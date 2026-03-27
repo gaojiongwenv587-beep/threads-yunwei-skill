@@ -1,6 +1,15 @@
 ---
 name: threads-yunwei
-description: Threads 全AI驱动自动账号运营。Claude 作为决策引擎贯穿全程：AI筛选评论目标、AI评估洗稿价值、AI生成内容、AI分析数据、AI更新记忆、AI提案进化。全天候机会驱动，每日20-30条精准引流评论。适用于任意垂直领域账号运营。
+description: |
+  Threads 全AI驱动自动账号运营技能。Claude 作为决策引擎，完成数据抓取、内容生成、精准评论、效果回溯、记忆进化的完整闭环。
+  当用户要求运营 Threads 账号时触发，包括：「运营 Threads」「帮我运营一下」「执行今日运营」「更新运营策略」「查看运营记忆」「查看 KPI」「触发进化审查」「切换账号」等。
+version: 1.0.0
+metadata:
+  openclaw:
+    emoji: "📊"
+    os:
+      - darwin
+      - linux
 ---
 
 # threads-yunwei — Claude 全程驱动的自动运营系统

@@ -699,13 +699,15 @@ Feed + 对标账号 同时出现→ +22分
 **维度三：时效性分（25分）**
 ```
 帖子发布时间：
-  0-6小时内   → ×1.5（发酵中，参与价值最高）
-  6-24小时    → ×1.0（正常）
-  24-48小时   → ×0.6（热度衰减）
-  48小时以上  → ×0.2（基本冷却）
+  0-6小时内   → 25.0分（满分，发酵中，参与价值最高）
+  6-24小时    → 16.7分（正常）
+  24-48小时   → 10.0分（热度衰减）
+  48小时以上  →  3.3分（基本冷却）
 ```
 
 **综合热度分 = 互动分×0.4 + 跨源分×0.35 + 时效分×0.25**
+
+> 三维评分由 `filter-comment.py` 实际执行，不是 Claude 估算。
 
 ---
 
@@ -725,12 +727,12 @@ Feed + 对标账号 同时出现→ +22分
 - 排除：政治/歧视/医疗事故敏感内容
 - 排除：发帖时间 > 48小时（太旧）
 
-AI 深度筛选（交由 Phase 4.1 执行，Claude 对每条帖子进行语境判断）：
+AI 深度筛选（交由 Phase 4.1 执行，调用 `filter-comment.py` 完成）：
 - `should_comment: true`  + `priority: high/medium` → 进入今日评论队列
 - `should_comment: false` + 帖子热度高 → 点赞候选池
 - `should_comment: false` + 帖子热度低 → 跳过
 
-输出今日评论候选池（目标30-50条，执行时按 priority 优先取20-30条）
+输出今日评论候选池（目标30-50条，执行时按 score_total 优先取20-30条）
 
 ---
 
@@ -928,90 +930,70 @@ python scripts/cli.py get-thread --url "[刚发布的帖子URL]"
 
 ---
 
-### 4.1 AI 评论目标筛选（发评论前必须执行）
+### 4.1 评论目标筛选（发评论前必须执行）
 
-> ⛔ 这是整个系统中 AI 判断最关键的环节。
-> 不用关键词匹配，不用打分公式——Claude 真正读懂每条帖子的人情语境再决定。
+> ⛔ 这是整个系统中最关键的环节。
+> 关键词过滤 + 三维热度评分 + AI 语境判断，全部由 `filter-comment.py` 执行。
 
-#### 第一关：机械过滤（快速排除）
+#### 执行命令
 
-先用规则过滤掉明显不合适的帖子：
+将 Phase 2 采集的帖子存为文件，调用筛选脚本：
 
-**排除词库**（含任一词直接跳过）：
+```bash
+FILTER_SCRIPT=~/Desktop/threads-filter-comment/filter-comment.py
+TMPDIR="/tmp/threads-filter"
+
+# 三源模式（推荐）
+python3 "$FILTER_SCRIPT" \
+  --feed-file      "$TMPDIR/feed.json" \
+  --keyword-file   "$TMPDIR/keyword.json" \
+  --benchmark-file "$TMPDIR/benchmark.json" \
+  --only-approved \
+  > "$TMPDIR/result.json"
+
+# 仅 Feed（快速模式）
+python3 "$FILTER_SCRIPT" \
+  --feed-file "$TMPDIR/feed.json" \
+  --only-approved \
+  > "$TMPDIR/result.json"
 ```
-竞品广告类：我們家、歡迎預約、歡迎諮詢、院長推薦（或同类推销话术）
-商业推广类：價格優惠、促銷、line:、微信、wechat、官網
-已过时类：发帖时间 > 48小时
-已处理类：已在 `list-replied` 返回列表中
-```
 
-> 排除词可根据行业特点在 `KNOWLEDGE_FILES` 中补充账号专属排除词。
-
-**优先级预排序**（过滤后对剩余帖子分层，根据 `KEYWORDS` 自动匹配）：
-```
-第一层（最优先）：与 $KEYWORDS 中核心词高度匹配，且有真实需求信号
-第二层：与 $KEYWORDS 中行业词部分匹配
-第三层：与目标受众 $ACCOUNT_AUDIENCE 相关的潜在用户
-```
-
-每层内部按互动量排序，优先处理高曝光帖子。
-
----
-
-#### 第二关：AI 语境判断（核心筛选）
-
-对通过第一关的每条帖子，Claude 逐条进行语境分析：
-
-```
-你是「$ACCOUNT_NAME」的官方帳號。
-帳號定位：$ACCOUNT_PROFILE
-目標受眾：$ACCOUNT_AUDIENCE
-
-現在要判斷是否以這個帳號的身份在這條帖子下留言。
-
-帖子內容：[帖子全文]
-
-請仔細閱讀後回答：
-1. 這個人是什麼身份？（目標受眾/潛在用戶/從業者/在吐槽/其他）
-2. 他現在的情緒是？（期待/糾結/擔憂/負面/中性）
-3. 他真正的需求是什麼？（想要建議/想要比較/想要安全感/單純分享/其他）
-4. 如果以「$ACCOUNT_NAME」的專業身份回應，能為對方提供真正有價值的資訊嗎？
-   還是會顯得突兀、像在打廣告？
-
-判斷標準：
-✅ 適合：對方有真實需求，本帳號的專業判斷能真正幫到他，介入自然不違和
-❌ 不適合：純粹在吐槽 / 是同行或競品 / 情緒激烈不適合介入 / 插嘴只會顯得刻意
-
-返回：{ "should_comment": true/false, "reason": "判斷理由", "priority": "high/medium/low" }
-```
+筛选逻辑（代码实现，非 Claude 估算）：
+- **第一关**：排除词 + 政治词过滤（`exclude_keywords` 配置于 `~/.threads-filter-comment.json`）
+- **第二关**：关键词匹配 → 标记 `priority: high/medium`
+- **第三关**：三维热度评分 → `score_total`（互动×0.4 + 跨源×0.35 + 时效×0.25）
+- **第四关**：AI 语境判断 → `ai_should_comment: true/false`
 
 **判断结果处理**：
 ```
-should_comment: true  + priority: high   → 立即执行，最高优先
-should_comment: true  + priority: medium → 加入队列
-should_comment: false                    → 跳过，仅点赞
+ai_should_comment: true  + priority: high   → 立即执行，最高优先
+ai_should_comment: true  + priority: medium → 加入队列
+ai_should_comment: false                    → 跳过，仅点赞
 ```
 
-**找不到合适帖子时**：刷新Feed重新抓取，最多重试5次，每次间隔2秒。
+**找不到合适帖子时**：重新执行 Phase 2 抓取，最多重试 3 次。
 
 ---
 
 #### 筛选结果输出
 
+读取 `$TMPDIR/result.json`，按以下格式展示：
+
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🔍 评论目标筛选完成
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-扫描帖子     XXX 条
-排除词过滤   剩余 XX 条
-AI 判断      适合评论 XX 条
+总输入       XXX 条
+去重后        XX 条
+关键词命中    XX 条
+AI 判断通过   XX 条
 
 优先级分布
-  高优先（韩国相关+有需求）  X 条
-  中优先（医美相关+适合）    X 条
-  低优先（潜在受众）         X 条
+  🔴 高优先（score_total ≥ 60）  X 条
+  🟡 中优先（score_total 35-59） X 条
+  🟢 低优先（score_total < 35）  X 条
 
-本次执行目标：XX 条
+本次执行目标：取高优先全部 + 中优先前 N 条
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
